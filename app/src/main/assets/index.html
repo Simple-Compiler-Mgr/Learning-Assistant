@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习助手 - 你的智能学习伙伴</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: #ffffff;
+            color: #1d1d1f;
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        .nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            padding: 1rem 0;
+        }
+
+        .nav-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            color: #1d1d1f;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s;
+        }
+
+        .nav-links a:hover {
+            color: #0066cc;
+        }
+
+        .hero {
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0 2rem;
+            background: url('https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@f5d3d92da00342e5b0baa097d9d64e0015ee1629/pic/2025/05/11/355b9f1f584da13b2e4916b2eba4ca9f.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            position: relative;
+        }
+
+        .hero-content {
+            max-width: 800px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 1s ease forwards;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .hero p {
+            font-size: 1.5rem;
+            color: #ffffff;
+            margin-bottom: 2rem;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 1s ease 0.3s forwards;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .cta-button {
+            display: inline-block;
+            background: #0066cc;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 30px;
+            text-decoration: none;
+            font-size: 1.1rem;
+            transition: all 0.3s;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 1s ease 0.6s forwards;
+        }
+
+        .cta-button:hover {
+            background: #004499;
+            transform: scale(1.05);
+        }
+
+        .section {
+            padding: 6rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            opacity: 0;
+            transform: translateY(50px);
+            transition: all 1s ease;
+        }
+
+        .section.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .section h2 {
+            font-size: 3rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .section p {
+            font-size: 1.2rem;
+            color: #86868b;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            background: #f5f5f7;
+            padding: 2rem;
+            border-radius: 20px;
+            text-align: center;
+            transition: transform 0.3s;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        .feature-card.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .feature-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card p {
+            font-size: 1rem;
+            color: #86868b;
+            line-height: 1.8;
+        }
+
+        .feature-card .feature-line {
+            display: block;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.5s ease;
+        }
+
+        .feature-card.visible .feature-line {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .feature-card.visible .feature-line:nth-child(1) { transition-delay: 0.1s; }
+        .feature-card.visible .feature-line:nth-child(2) { transition-delay: 0.2s; }
+        .feature-card.visible .feature-line:nth-child(3) { transition-delay: 0.3s; }
+        .feature-card.visible .feature-line:nth-child(4) { transition-delay: 0.4s; }
+
+        .feature-preview {
+            flex: 1;
+            height: 500px;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .feature-preview:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-preview:hover img {
+            transform: scale(1.05);
+        }
+
+        .app-preview {
+            width: 100%;
+            height: 600px;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            margin: 3rem 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .app-preview:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.15);
+        }
+
+        .app-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .app-preview:hover img {
+            transform: scale(1.05);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .feature-preview, .app-preview {
+            animation: fadeIn 1s ease forwards;
+        }
+
+        @keyframes fadeInUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .hero p {
+                font-size: 1.2rem;
+            }
+
+            .section h2 {
+                font-size: 2rem;
+            }
+
+            .nav-links {
+                display: none;
+            }
+        }
+
+        .feature-section {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-section:nth-child(odd) {
+            background: linear-gradient(to bottom, #f5f5f7, #ffffff);
+        }
+
+        .feature-section:nth-child(even) {
+            background: linear-gradient(to bottom, #ffffff, #f5f5f7);
+        }
+
+        .feature-content {
+            max-width: 1200px;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 4rem;
+            opacity: 0;
+            transform: translateY(50px);
+            transition: all 1s ease;
+        }
+
+        .feature-content.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .feature-text {
+            flex: 1;
+            text-align: left;
+        }
+
+        .feature-text h2 {
+            font-size: 3.5rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            color: #1d1d1f;
+        }
+
+        .feature-text p {
+            font-size: 1.2rem;
+            color: #86868b;
+            line-height: 1.8;
+            margin-bottom: 2rem;
+        }
+
+        .feature-line {
+            display: block;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
+            margin-bottom: 1rem;
+        }
+
+        .feature-content.visible .feature-line {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .feature-content.visible .feature-line:nth-child(1) { transition-delay: 0.1s; }
+        .feature-content.visible .feature-line:nth-child(2) { transition-delay: 0.2s; }
+        .feature-content.visible .feature-line:nth-child(3) { transition-delay: 0.3s; }
+        .feature-content.visible .feature-line:nth-child(4) { transition-delay: 0.4s; }
+
+        .version-info {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #86868b;
+        }
+
+        .changelog {
+            max-width: 600px;
+            margin: 2rem auto;
+            text-align: left;
+            padding: 2rem;
+            background: #f5f5f7;
+            border-radius: 20px;
+        }
+
+        .changelog h3 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            color: #1d1d1f;
+        }
+
+        .changelog ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .changelog li {
+            margin-bottom: 0.5rem;
+            color: #86868b;
+            font-size: 0.9rem;
+            padding-left: 1.5rem;
+            position: relative;
+        }
+
+        .changelog li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-content">
+            <div class="logo">学习助手</div>
+            <div class="nav-links">
+                <a href="#features">功能特点</a>
+                <a href="#preview">界面预览</a>
+                <a href="#download">立即下载</a>
+            </div>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1>学习助手</h1>
+            <p>让学习更高效，让进步更明显</p>
+            <a href="#download" class="cta-button">立即体验</a>
+        </div>
+    </section>
+
+    <section id="features" class="section">
+        <h2>核心功能</h2>
+        <p>为你的学习之路提供全方位支持</p>
+    </section>
+
+    <section class="feature-section">
+        <div class="feature-content">
+            <div class="feature-text">
+                <h2>专注计时</h2>
+                <p>
+                    <span class="feature-line">智能倒计时，专注每一刻</span>
+                    <span class="feature-line">自定义时间，灵活掌控</span>
+                    <span class="feature-line">动态显示，清晰直观</span>
+                    <span class="feature-line">记录有效学习时间</span>
+                </p>
+            </div>
+            <div class="feature-preview">
+                <img src="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@0f8b474301b96e0132915f3f1fbb12bd6e457683/pic/2025/05/11/84dfc74b0ac0b16040b3f0d35cbf9432.png" alt="专注计时">
+            </div>
+        </div>
+    </section>
+
+    <section class="feature-section">
+        <div class="feature-content">
+            <div class="feature-preview">
+                <img src="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@6b275196d631973c2725ec498a4b7e41b6f253c0/pic/2025/05/11/7712e8aee79f0ae7706aaadc55f6ccd8.png" alt="精确秒表">
+            </div>
+            <div class="feature-text">
+                <h2>精确秒表</h2>
+                <p>
+                    <span class="feature-line">毫秒级精确计时</span>
+                    <span class="feature-line">分段记录，追踪进步</span>
+                    <span class="feature-line">自动保存最佳记录</span>
+                    <span class="feature-line">实时累计，一目了然</span>
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="feature-section">
+        <div class="feature-content">
+            <div class="feature-text">
+                <h2>错题管理</h2>
+                <p>
+                    <span class="feature-line">分类整理，条理清晰</span>
+                    <span class="feature-line">详细记录，重点突出</span>
+                    <span class="feature-line">一键查看，复习便捷</span>
+                    <span class="feature-line">持续积累，稳步提升</span>
+                </p>
+            </div>
+            <div class="feature-preview">
+                <img src="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@6a6243f1e3994a41f4724e45385f65ac6f86b8cc/pic/2025/05/11/3a6de8c4cfb3b082c727edd37417ed33.png" alt="错题管理">
+            </div>
+        </div>
+    </section>
+
+    <section class="feature-section">
+        <div class="feature-content">
+            <div class="feature-preview">
+                <img src="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@bcb7efa2de725c36f0b06824ff40c58652bd04d0/pic/2025/05/11/76d7c3c181639e9172a659ef8bd4c8d6.png" alt="学习提醒">
+            </div>
+            <div class="feature-text">
+                <h2>学习提醒</h2>
+                <p>
+                    <span class="feature-line">目标明确，计划清晰</span>
+                    <span class="feature-line">灵活管理，轻松追踪</span>
+                    <span class="feature-line">完成标记，成就感强</span>
+                    <span class="feature-line">学习进度，一目了然</span>
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section id="preview" class="section">
+        <h2>界面预览</h2>
+        <p>简洁优雅的设计，流畅的操作体验</p>
+        <div class="app-preview">
+            <img src="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@9298b57d27f3375d88623085fe837fbf3f8bbd01/pic/2025/05/11/ebb3c4047d28557ddea433f9cd90f740.png" alt="界面预览">
+        </div>
+    </section>
+
+    <section id="download" class="section">
+        <h2>立即下载</h2>
+        <p>开启你的高效学习之旅</p>
+        <div style="text-align: center;">
+            <a href="#" class="cta-button">下载学习助手</a>
+            <div class="version-info">V1.0.0 Beta2</div>
+        </div>
+        <div class="changelog">
+            <h3>更新记录</h3>
+            <ul>
+                <li>Beta2 (2024.03.21)
+                    <ul>
+                        <li>优化界面动画效果，提升视觉体验</li>
+                        <li>新增功能模块展示动画</li>
+                        <li>添加应用图标</li>
+                        <li>优化页面布局和响应式设计</li>
+                    </ul>
+                </li>
+                <li>Beta1 (2024.03.20)
+                    <ul>
+                        <li>首次发布</li>
+                        <li>实现基础功能：专注计时、精确秒表、错题管理、学习提醒</li>
+                        <li>支持数据本地存储</li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <script>
+        // 滚动动画
+        const sections = document.querySelectorAll('.section');
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                } else {
+                    // 当元素离开视口时，移除visible类，以便重新触发动画
+                    entry.target.classList.remove('visible');
+                }
+            });
+        }, {
+            threshold: 0.1
+        });
+
+        sections.forEach(section => {
+            observer.observe(section);
+        });
+
+        // 平滑滚动
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+
+        // 功能模块动画
+        const featureContents = document.querySelectorAll('.feature-content');
+        
+        const featureContentObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                } else {
+                    // 当元素离开视口时，移除visible类，以便重新触发动画
+                    entry.target.classList.remove('visible');
+                }
+            });
+        }, {
+            threshold: 0.2
+        });
+
+        featureContents.forEach(content => {
+            featureContentObserver.observe(content);
+        });
+
+        // 修改hero动画重播逻辑
+        const heroObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const hero = entry.target;
+                    hero.style.animation = 'none';
+                    hero.offsetHeight; // 触发重排
+                    hero.style.animation = null;
+                }
+            });
+        }, {
+            threshold: 0.1
+        });
+
+        // 观察hero部分
+        const heroSection = document.querySelector('.hero');
+        if (heroSection) {
+            heroObserver.observe(heroSection);
+        }
+    </script>
+</body>
+</html> 
