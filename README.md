@@ -247,13 +247,3 @@ class PerformanceTest {
 - Android SDK 34+
 - JDK 17+
 
-## 许可证
-
-MIT License
-
-## 联系方式
-
-- 项目维护者：[Your Name]
-- 邮箱：[Your Email]
-- GitHub：[Your GitHub]
-- 技术博客：[Your Blog] 
