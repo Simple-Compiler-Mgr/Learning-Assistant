@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -39,11 +42,14 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sompiler.lass.ui.theme.LearningAssistantTheme
+import com.sompiler.lass.service.TimerService
+import com.sompiler.lass.viewmodel.TimerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
@@ -75,6 +81,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.background
 import kotlin.math.sin
 import kotlin.random.Random
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.shadow
 
 object AppState {
     var shortestLapTime: Long? = null
@@ -84,6 +95,42 @@ class AppViewModel(private val repository: AppRepository) : ViewModel() {
     val allReminders = repository.allReminders.asLiveData()
     val allQuestions = repository.allQuestions.asLiveData()
     val allStudyRecords = repository.allStudyRecords.asLiveData()
+    
+    // 计时器状态
+    private val _timerState = MutableStateFlow(TimerState())
+    val timerState: StateFlow<TimerState> = _timerState.asStateFlow()
+    
+    // 秒表状态
+    private val _stopwatchState = MutableStateFlow(StopwatchState())
+    val stopwatchState: StateFlow<StopwatchState> = _stopwatchState.asStateFlow()
+    
+    fun updateTimerState(
+        selectedTime: Long? = null,
+        remainingTime: Long? = null,
+        isRunning: Boolean? = null,
+        startTime: Long? = null
+    ) {
+        _timerState.value = _timerState.value.copy(
+            selectedTime = selectedTime ?: _timerState.value.selectedTime,
+            remainingTime = remainingTime ?: _timerState.value.remainingTime,
+            isRunning = isRunning ?: _timerState.value.isRunning,
+            startTime = startTime ?: _timerState.value.startTime
+        )
+    }
+    
+    fun updateStopwatchState(
+        elapsedTime: Long? = null,
+        isRunning: Boolean? = null,
+        startTime: Long? = null,
+        lapTimes: List<Long>? = null
+    ) {
+        _stopwatchState.value = _stopwatchState.value.copy(
+            elapsedTime = elapsedTime ?: _stopwatchState.value.elapsedTime,
+            isRunning = isRunning ?: _stopwatchState.value.isRunning,
+            startTime = startTime ?: _stopwatchState.value.startTime,
+            lapTimes = lapTimes ?: _stopwatchState.value.lapTimes
+        )
+    }
     
     fun insertReminder(reminder: ReminderEntity) = viewModelScope.launch {
         repository.insertReminder(reminder)
@@ -114,6 +161,20 @@ class AppViewModel(private val repository: AppRepository) : ViewModel() {
     }
 }
 
+data class TimerState(
+    val selectedTime: Long = 0L,
+    val remainingTime: Long = 0L,
+    val isRunning: Boolean = false,
+    val startTime: Long? = null
+)
+
+data class StopwatchState(
+    val elapsedTime: Long = 0L,
+    val isRunning: Boolean = false,
+    val startTime: Long? = null,
+    val lapTimes: List<Long> = emptyList()
+)
+
 class MainActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
         object : ViewModelProvider.Factory {
@@ -122,6 +183,19 @@ class MainActivity : ComponentActivity() {
                 val repository = AppRepository(database)
                 @Suppress("UNCHECKED_CAST")
                 return AppViewModel(repository) as T
+            }
+        }
+    }
+    
+    private val timerViewModel: TimerViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                val database = AppDatabase.getDatabase(applicationContext)
+                val repository = AppRepository(database)
+                val viewModel = TimerViewModel(application)
+                viewModel.setRepository(repository)
+                @Suppress("UNCHECKED_CAST")
+                return viewModel as T
             }
         }
     }
@@ -136,7 +210,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(viewModel)
+                    MainScreen(viewModel, timerViewModel)
                 }
             }
         }
@@ -144,7 +218,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(viewModel: AppViewModel) {
+fun MainScreen(viewModel: AppViewModel, timerViewModel: TimerViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
     
     Scaffold(
@@ -183,42 +257,332 @@ fun MainScreen(viewModel: AppViewModel) {
 
 @Composable
 fun TimerScreen(viewModel: AppViewModel) {
-    var selectedTime by remember { mutableStateOf(30) }
-    var remainingTime by remember { mutableStateOf(0) }
-    var isRunning by remember { mutableStateOf(false) }
+    val timerState by viewModel.timerState.collectAsState()
     var showCustomTime by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
-    var showReport by remember { mutableStateOf(false) }
-    var startTime by remember { mutableStateOf<Long?>(null) }
-    var elapsedTime by remember { mutableStateOf(0L) }
+    val isRunning = timerState.isRunning
+    val presetTimes = listOf(30L, 60L, 90L, 120L)
     val scope = rememberCoroutineScope()
-    
-    // 观察学习记录
-    val studyRecords by viewModel.allStudyRecords.observeAsState(initial = emptyList())
-    
-    val presetTimes = listOf(30, 60, 90, 120)
-    
-    // 添加更多动画状态
-    val timeScale by animateFloatAsState(
-        targetValue = if (isRunning) 1.1f else 1f,
+
+    // 右上角窗口状态
+    var showHistory by remember { mutableStateOf(false) }
+    var showDuration by remember { mutableStateOf(false) }
+
+    // 动画：背景脉冲
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200),
+            repeatMode = RepeatMode.Reverse
+        ), label = "pulse"
+    )
+
+    // 动画：按钮分裂
+    var showSplit by remember { mutableStateOf(false) }
+    LaunchedEffect(isRunning) { showSplit = isRunning }
+
+    // 动画：自定义弹窗
+    var showCustomAnim by remember { mutableStateOf(false) }
+    LaunchedEffect(showCustomTime) {
+        if (showCustomTime) showCustomAnim = true
+    }
+
+    LaunchedEffect(isRunning, timerState.startTime, timerState.selectedTime) {
+        if (isRunning) {
+            val startTimestamp = timerState.startTime ?: System.currentTimeMillis()
+            val totalMillis = timerState.remainingTime
+            val startRemain = timerState.remainingTime
+            val startAt = System.currentTimeMillis()
+            while (true) {
+                val elapsed = System.currentTimeMillis() - startAt
+                val left = startRemain - elapsed
+                if (!isRunning || left <= 0) break
+                viewModel.updateTimerState(remainingTime = left)
+                delay(100L)
+            }
+            if (isRunning) {
+                // 倒计时结束
+                viewModel.updateTimerState(isRunning = false, remainingTime = 0L, startTime = null)
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        // 背景脉冲动画
+        if (isRunning) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(pulseScale)
+                    .alpha(0.08f)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 0.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 顶部栏，右上角按钮
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Row(
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(onClick = { showHistory = true }) {
+                        Icon(Icons.Filled.History, contentDescription = "历史记录")
+                    }
+                    IconButton(onClick = { showDuration = true }) {
+                        Icon(Icons.Filled.Assessment, contentDescription = "学习时长记录")
+                    }
+                }
+            }
+            // 顶部大号时间（无跳动动画）
+            Text(
+                text = formatTime(timerState.remainingTime),
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 88.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(vertical = 0.dp)
+            )
+            Spacer(modifier = Modifier.height(64.dp))
+            // 预设时间按钮
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                presetTimes.forEach { time ->
+                    PresetTimeCard1to1(
+                        time = time,
+                        selected = false,
+                        onClick = {
+                            if (!isRunning) {
+                                // 未开始时覆盖
+                                viewModel.updateTimerState(
+                                    selectedTime = time,
+                                    remainingTime = time * 60 * 1000L
+                                )
+                            } else {
+                                // 计时中叠加
+                                val addMillis = time * 60 * 1000L
+                                val newRemain = timerState.remainingTime + addMillis
+                                val newSelected = (newRemain / 1000 / 60).coerceAtLeast(1L)
+                                viewModel.updateTimerState(
+                                    selectedTime = newSelected,
+                                    remainingTime = newRemain
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            // 自定义按钮
+            CustomTimeCard1to1(onClick = { showCustomTime = true })
+            Spacer(modifier = Modifier.weight(1f))
+            // 底部操作按钮（分裂动画）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 120.dp), // 更靠上
+                contentAlignment = Alignment.Center
+            ) {
+                AnimatedContent(
+                    targetState = showSplit,
+                    transitionSpec = {
+                        fadeIn(tween(200)) + slideInHorizontally { it } togetherWith
+                        fadeOut(tween(200)) + slideOutHorizontally { -it }
+                    }, label = "split"
+                ) { split ->
+                    if (!split) {
+                        MainActionButton1to1(
+                            text = "开始",
+                            icon = Icons.Filled.PlayArrow,
+                            onClick = {
+                                viewModel.updateTimerState(isRunning = true, startTime = System.currentTimeMillis())
+                            },
+                            enabled = timerState.selectedTime > 0 && timerState.remainingTime > 0
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier,
+                            horizontalArrangement = Arrangement.spacedBy(32.dp)
+                        ) {
+                            MainActionButton1to1(
+                                text = "暂停",
+                                icon = Icons.Filled.Pause,
+                                onClick = {
+                                    viewModel.updateTimerState(isRunning = false, startTime = null)
+                                }
+                            )
+                            MainActionButton1to1(
+                                text = "重置",
+                                icon = Icons.Filled.Clear,
+                                onClick = {
+                                    viewModel.updateTimerState(
+                                        isRunning = false,
+                                        startTime = null,
+                                        remainingTime = timerState.selectedTime * 60 * 1000L
+                                    )
+                                },
+                                isRed = true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // 自定义时间弹窗动画
+        AnimatedVisibility(
+            visible = showCustomTime,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            CustomTimeScreen(
+                onDismiss = { showCustomTime = false },
+                onTimeSelected = { time ->
+                    viewModel.updateTimerState(
+                        selectedTime = time,
+                        remainingTime = time * 60 * 1000L
+                    )
+                    showCustomTime = false
+                }
+            )
+        }
+        // 历史记录窗口
+        AnimatedVisibility(
+            visible = showHistory,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+        ) {
+            HistoryWindow(viewModel, { showHistory = false })
+        }
+        // 学习时长记录窗口
+        AnimatedVisibility(
+            visible = showDuration,
+            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+        ) {
+            DurationWindow(viewModel, { showDuration = false })
+        }
+    }
+}
+
+@Composable
+fun PresetTimeCard1to1(time: Long, selected: Boolean, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
+        ), label = "scale"
+    )
+    Surface(
+        modifier = Modifier
+            .size(88.dp)
+            .scale(scale)
+            .shadow(10.dp, CircleShape),
+        shape = CircleShape,
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        onClick = onClick,
+        interactionSource = interactionSource
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = time.toString(),
+                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun CustomTimeCard1to1(onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ), label = "scale"
+    )
+    Surface(
+        modifier = Modifier
+            .height(48.dp)
+            .width(120.dp)
+            .scale(scale)
+            .shadow(6.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        onClick = onClick,
+        interactionSource = interactionSource
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = "自定义",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun MainActionButton1to1(text: String, icon: ImageVector, onClick: () -> Unit, isRed: Boolean = false, enabled: Boolean = true) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ), label = "scale"
+    )
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .height(56.dp)
+            .width(160.dp)
+            .scale(scale)
+            .shadow(8.dp, RoundedCornerShape(28.dp)),
+        shape = RoundedCornerShape(28.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isRed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
         ),
-        label = "timeScale"
-    )
+        interactionSource = interactionSource
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(28.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text, color = MaterialTheme.colorScheme.onPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun StopwatchScreen(viewModel: AppViewModel) {
+    val stopwatchState by viewModel.stopwatchState.collectAsState()
     
-    val timeColor by animateColorAsState(
-        targetValue = if (isRunning) 
-            MaterialTheme.colorScheme.primary 
-        else 
-            MaterialTheme.colorScheme.onSurface,
-        animationSpec = tween(durationMillis = 300),
-        label = "timeColor"
-    )
-    
+    // 动画状态
     val buttonScale by animateFloatAsState(
-        targetValue = if (isRunning) 0.95f else 1f,
+        targetValue = if (stopwatchState.isRunning) 0.9f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
@@ -226,11 +590,11 @@ fun TimerScreen(viewModel: AppViewModel) {
         label = "buttonScale"
     )
     
-    // 添加脉冲动画
+    // 脉冲动画
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = 1.1f,
+        targetValue = 1.2f,
         animationSpec = infiniteRepeatable(
             animation = tween(1000),
             repeatMode = RepeatMode.Reverse
@@ -238,1208 +602,211 @@ fun TimerScreen(viewModel: AppViewModel) {
         label = "pulse"
     )
     
-    // 计算字体大小
-    val timeText = formatTime(remainingTime)
-    val fontSize = when {
-        timeText.length <= 5 -> 96.sp
-        timeText.length <= 7 -> 72.sp
-        timeText.length <= 9 -> 48.sp
-        else -> 36.sp
-    }
-    
-    // 计时器逻辑
-    LaunchedEffect(isRunning) {
-        if (isRunning && remainingTime > 0) {
-            if (startTime == null) {
-                startTime = System.currentTimeMillis()
-            }
-            while (remainingTime > 0) {
-                delay(1000)
-                remainingTime--
-                elapsedTime += 1000
-            }
-            isRunning = false
-            // 记录学习时间
-            startTime?.let { start ->
-                val endTime = System.currentTimeMillis()
-                val duration = endTime - start
-                // 只记录有效的学习时间（倒计时结束时的实际时间）
-                viewModel.insertStudyRecord(
-                    StudyRecordEntity(
-                        startTime = start,
-                        endTime = endTime,
-                        duration = duration,
-                        type = "timer"
-                    )
-                )
-                startTime = null
-            }
-        } else if (!isRunning && startTime != null) {
-            // 如果中途暂停，不记录学习时间
-            startTime = null
-        }
-    }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // 添加背景动画
-        if (isRunning) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(0.1f)
-                    .scale(pulseScale)
-            ) {
-                CircularProgressIndicator(
-                    progress = 1f,
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 2.dp
-                )
-            }
-        }
-        
-        AnimatedVisibility(
-            visible = showCustomTime,
-            enter = fadeIn() + expandVertically() + slideInVertically { it },
-            exit = fadeOut() + shrinkVertically() + slideOutVertically { it }
-        ) {
-            CustomTimeScreen(
-                onBack = { showCustomTime = false },
-                onTimeSelected = { minutes ->
-                    selectedTime = minutes
-                    remainingTime = minutes * 60
-                    showCustomTime = false
-                }
-            )
-        }
-        
-        AnimatedVisibility(
-            visible = !showCustomTime,
-            enter = fadeIn() + expandVertically() + slideInVertically { -it },
-            exit = fadeOut() + shrinkVertically() + slideOutVertically { -it }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // 顶部栏
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-    Text(
-                        text = "计时器",
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    Row {
-                        // 历史记录按钮
-                        IconButton(
-                            onClick = { showHistory = true },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.History,
-                                contentDescription = "历史记录",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        
-                        // 报告按钮
-                        IconButton(
-                            onClick = { showReport = true },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Assessment,
-                                contentDescription = "学习报告",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-                
-                // 时间显示
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.3f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = timeText,
-                        style = MaterialTheme.typography.displayLarge,
-                        fontSize = fontSize,
-                        color = timeColor,
-                        modifier = Modifier.scale(timeScale)
-                    )
-                }
-                
-                // 中间控制区域
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(0.7f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // 预设时间按钮
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            presetTimes.forEach { time ->
-                                val interactionSource = remember { MutableInteractionSource() }
-                                val isPressed by interactionSource.collectIsPressedAsState()
-                                val scale by animateFloatAsState(
-                                    targetValue = if (isPressed) 1.2f else 1f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessVeryLow
-                                    ),
-                                    label = "scale"
-                                )
-                                
-                                val buttonColor by animateColorAsState(
-                                    targetValue = if (selectedTime == time && !isRunning) 
-                                        MaterialTheme.colorScheme.primary 
-                                    else 
-                                        MaterialTheme.colorScheme.surface,
-                                    animationSpec = tween(durationMillis = 300),
-                                    label = "buttonColor"
-                                )
-                                
-                                val textColor by animateColorAsState(
-                                    targetValue = if (selectedTime == time && !isRunning) 
-                                        MaterialTheme.colorScheme.onPrimary 
-                                    else 
-                                        MaterialTheme.colorScheme.onSurface,
-                                    animationSpec = tween(durationMillis = 300),
-                                    label = "textColor"
-                                )
-                                
-                                Button(
-                                    onClick = { 
-                                        if (isRunning) {
-                                            remainingTime += time * 60
-                                        } else {
-                                            selectedTime = time
-                                            remainingTime = time * 60
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .width(80.dp)
-                                        .height(80.dp)
-                                        .scale(scale),
-                                    shape = CircleShape,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = buttonColor
-                                    ),
-                                    elevation = ButtonDefaults.buttonElevation(
-                                        defaultElevation = 4.dp,
-                                        pressedElevation = 8.dp
-                                    ),
-                                    interactionSource = interactionSource
-                                ) {
-                                    Text(
-                                        text = "${time}",
-                                        fontSize = 16.sp,
-                                        color = textColor
-                                    )
-                                }
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
-                        
-                        // 自定义时间按钮
-                        val customButtonScale by animateFloatAsState(
-                            targetValue = if (isRunning) 0.9f else 1f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessLow
-                            ),
-                            label = "customButtonScale"
-                        )
-                        
-                        Button(
-                            onClick = { showCustomTime = true },
-                            modifier = Modifier
-                                .width(120.dp)
-                                .height(48.dp)
-                                .scale(customButtonScale),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.secondary
-                            ),
-                            enabled = !isRunning
-                        ) {
-                            Text(
-                                text = "自定义",
-                                fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onSecondary
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(48.dp))
-                        
-                        // 控制按钮
-                        if (!isRunning && remainingTime == 0) {
-                            Button(
-                                onClick = { 
-                                    remainingTime = selectedTime * 60
-                                    isRunning = true
-                                },
-                                modifier = Modifier
-                                    .width(160.dp)
-                                    .height(64.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                )
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.PlayArrow,
-                                        contentDescription = "开始",
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "开始计时",
-                                        fontSize = 20.sp
-                                    )
-                                }
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                // 暂停/继续按钮
-                                Button(
-                                    onClick = { isRunning = !isRunning },
-                                    modifier = Modifier
-                                        .width(120.dp)
-                                        .height(64.dp)
-                                        .scale(buttonScale),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isRunning) 
-                                            MaterialTheme.colorScheme.error 
-                                        else 
-                                            MaterialTheme.colorScheme.primary
-                                    ),
-                                    shape = CircleShape,
-                                    elevation = ButtonDefaults.buttonElevation(
-                                        defaultElevation = 8.dp,
-                                        pressedElevation = 12.dp
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = if (isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                        contentDescription = if (isRunning) "暂停" else "继续",
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .graphicsLayer {
-                                                if (isRunning) {
-                                                    rotationZ = sin(elapsedTime * 0.2f) * 10f
-                                                }
-                                            }
-                                    )
-                                }
-                                
-                                // 重置按钮
-                                Button(
-                                    onClick = { 
-                                        isRunning = false
-                                        remainingTime = 0
-                                        startTime = null
-                                    },
-                                    modifier = Modifier
-                                        .width(120.dp)
-                                        .height(64.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.error
-                                    ),
-                                    shape = CircleShape
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Clear,
-                                        contentDescription = "重置",
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 历史记录全屏显示
-        AnimatedVisibility(
-            visible = showHistory,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it }
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "学习历史",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        
-                        IconButton(
-                            onClick = { showHistory = false },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "关闭",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    LazyColumn {
-                        items(studyRecords.sortedByDescending { it.startTime }) { record ->
-                            AnimatedVisibility(
-                                visible = true,
-                                enter = fadeIn() + expandVertically() + slideInVertically { it },
-                                exit = fadeOut() + shrinkVertically() + slideOutVertically { it }
-                            ) {
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface
-                                    )
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp)
-                                    ) {
-                                        Text(
-                                            text = "开始时间：${formatDateTime(record.startTime)}",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Text(
-                                            text = "结束时间：${formatDateTime(record.endTime)}",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Text(
-                                            text = "学习时长：${formatDuration(record.duration)}",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 学习报告全屏显示
-        AnimatedVisibility(
-            visible = showReport,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it }
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "今日学习报告",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        
-                        IconButton(
-                            onClick = { showReport = false },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "关闭",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(32.dp))
-                    
-                    val todayRecords = studyRecords.filter {
-                        isToday(it.startTime)
-                    }
-                    val totalDuration = todayRecords.sumOf { it.duration / 1000 }
-                    val todayCount = todayRecords.size
-                    
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn() + expandVertically() + slideInVertically { it },
-                        exit = fadeOut() + shrinkVertically() + slideOutVertically { it }
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(24.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = formatDuration(totalDuration),
-                                        style = MaterialTheme.typography.displayLarge,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                    Text(
-                                        text = "今日学习总时长",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            }
-                            
-                            Spacer(modifier = Modifier.height(24.dp))
-                            
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                )
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    Text(
-                                        text = "今日学习次数：${todayCount}次",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    if (todayCount > 0) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = "平均每次：${formatDuration(totalDuration / todayCount)}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CustomTimeScreen(
-    onBack: () -> Unit,
-    onTimeSelected: (Int) -> Unit
-) {
-    var customMinutes by remember { mutableStateOf("") }
-    var showError by remember { mutableStateOf(false) }
-    var showEasterEgg by remember { mutableStateOf(false) }
-    val density = LocalDensity.current
-    
-    // 计算按钮大小和间距
-    val buttonSize = with(density) { 80.dp }
-    val buttonSpacing = with(density) { 16.dp }
-    val screenPadding = with(density) { 16.dp }
-    
-    // 爱心动画状态
-    val hearts = remember { mutableStateListOf<Heart>() }
-    val infiniteTransition = rememberInfiniteTransition(label = "hearts")
-    
-    // 检查彩蛋
-    LaunchedEffect(customMinutes) {
-        if (customMinutes == "251024") {
-            showEasterEgg = true
-            // 添加多个爱心
-            repeat(20) {
-                hearts.add(
-                    Heart(
-                        x = Random.nextFloat() * 1000,
-                        y = 1000f,
-                        scale = Random.nextFloat() * 0.5f + 0.5f,
-                        speed = Random.nextFloat() * 2f + 1f
-                    )
-                )
-            }
-        }
-    }
-    
-    // 更新爱心位置
-    LaunchedEffect(showEasterEgg) {
-        if (showEasterEgg) {
-            while (true) {
-                delay(16)
-                hearts.forEachIndexed { index, heart ->
-                    hearts[index] = heart.copy(
-                        y = heart.y - heart.speed,
-                        x = heart.x + sin(heart.y * 0.01f) * 2f
-                    )
-                }
-                // 移除超出屏幕的爱心
-                hearts.removeAll { it.y < -100 }
-                // 添加新的爱心
-                if (hearts.size < 20) {
-                    hearts.add(
-                        Heart(
-                            x = Random.nextFloat() * 1000,
-                            y = 1000f,
-                            scale = Random.nextFloat() * 0.5f + 0.5f,
-                            speed = Random.nextFloat() * 2f + 1f
-                        )
-                    )
-                }
-            }
-        }
-    }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // 绘制爱心
-        if (showEasterEgg) {
-            hearts.forEach { heart ->
-                Text(
-                    text = "❤",
-                    modifier = Modifier
-                        .offset { IntOffset(heart.x.toInt(), heart.y.toInt()) }
-                        .scale(heart.scale),
-                    color = Color.Red,
-                    fontSize = 24.sp,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        }
-        
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(screenPadding),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.ArrowBack,
-                        contentDescription = "返回",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-                
-                Text(
-                    text = "自定义时间",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                Spacer(modifier = Modifier.width(48.dp))
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // 确定按钮上移
-            Button(
-                onClick = {
-                    val minutes = customMinutes.toIntOrNull() ?: 0
-                    if (minutes > 0 && minutes <= 300000) {
-                        onTimeSelected(minutes)
-                    }
-                },
-                modifier = Modifier
-                    .width(buttonSize * 2)
-                    .height(buttonSize),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                shape = CircleShape
-            ) {
-                Text(
-                    text = "确定",
-                    fontSize = 24.sp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            Text(
-                text = "当前输入：${customMinutes}分钟",
-                style = MaterialTheme.typography.titleLarge,
-                fontSize = 32.sp,
-                color = MaterialTheme.colorScheme.primary
-            )
-            
-            if (showError) {
-                Text(
-                    text = "时间不能超过300000分钟",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // 数字键盘
-            val numbers = listOf(
-                listOf("1", "2", "3"),
-                listOf("4", "5", "6"),
-                listOf("7", "8", "9"),
-                listOf("", "0", "删除")
-            )
-            
-            numbers.forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    row.forEach { number ->
-                        if (number.isNotEmpty()) {
-                            ExtendedFloatingActionButton(
-                                onClick = {
-                                    if (number == "删除") {
-                                        customMinutes = customMinutes.dropLast(1)
-                                        showError = false
-                                    } else {
-                                        val newValue = customMinutes + number
-                                        if (newValue.toIntOrNull() ?: 0 <= 300000) {
-                                            customMinutes = newValue
-                                            showError = false
-                                        } else {
-                                            showError = true
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.size(buttonSize),
-                                shape = CircleShape,
-                                containerColor = if (number == "删除") 
-                                    MaterialTheme.colorScheme.errorContainer 
-                                else 
-                                    MaterialTheme.colorScheme.surface,
-                                contentColor = if (number == "删除")
-                                    MaterialTheme.colorScheme.error
-                                else
-                                    MaterialTheme.colorScheme.onSurface,
-                                elevation = FloatingActionButtonDefaults.elevation(
-                                    defaultElevation = 8.dp,
-                                    pressedElevation = 12.dp
-                                )
-                            ) {
-                                Text(
-                                    text = if (number == "删除") "⌫" else number,
-                                    fontSize = 24.sp
-                                )
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.size(buttonSize))
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(buttonSpacing))
-            }
-        }
-    }
-}
-
-// 爱心数据类
-data class Heart(
-    val x: Float,
-    val y: Float,
-    val scale: Float,
-    val speed: Float
-)
-
-@Composable
-fun StopwatchScreen(viewModel: AppViewModel) {
-    var elapsedTime by remember { mutableStateOf(0L) }
-    var isRunning by remember { mutableStateOf(false) }
-    var lapTimes by remember { mutableStateOf(listOf<Long>()) }
-    var showHistory by remember { mutableStateOf(false) }
-    var startTime by remember { mutableStateOf<Long?>(null) }
-    val scope = rememberCoroutineScope()
-    
-    // 观察学习记录
-    val studyRecords by viewModel.allStudyRecords.observeAsState(initial = emptyList())
-    
-    // 添加动画状态
-    val startButtonScale by animateFloatAsState(
-        targetValue = if (isRunning) 0.9f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "startButtonScale"
-    )
-    
-    val lapButtonScale by animateFloatAsState(
-        targetValue = if (isRunning) 1f else 0.9f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "lapButtonScale"
-    )
-    
-    val resetButtonScale by animateFloatAsState(
-        targetValue = if (elapsedTime > 0) 1f else 0.9f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "resetButtonScale"
-    )
-    
-    // 添加更多动画状态
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
-    
-    val progressRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-    
-    LaunchedEffect(isRunning) {
-        if (isRunning) {
-            if (startTime == null) {
-                startTime = System.currentTimeMillis()
-            }
-            while (true) {
+    LaunchedEffect(stopwatchState.isRunning) {
+        if (stopwatchState.isRunning) {
+            while (stopwatchState.isRunning) {
                 delay(10)
-                elapsedTime += 10
+                val currentTime = System.currentTimeMillis()
+                val newElapsedTime = currentTime - (stopwatchState.startTime ?: currentTime)
+                viewModel.updateStopwatchState(elapsedTime = newElapsedTime)
             }
-        } else if (startTime != null) {
-            // 记录学习时间
-            val endTime = System.currentTimeMillis()
-            val duration = endTime - startTime!!
-            viewModel.insertStudyRecord(
-                StudyRecordEntity(
-                    startTime = startTime!!,
-                    endTime = endTime,
-                    duration = duration,
-                    type = "stopwatch"
-                )
-            )
-            startTime = null
         }
     }
     
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "秒表",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                IconButton(
-                    onClick = { showHistory = true },
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.History,
-                        contentDescription = "历史记录",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            Spacer(modifier = Modifier.weight(1f))
             
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // 修改环形进度条和时间显示
             Box(
                 modifier = Modifier
-                    .size(300.dp)
-                    .padding(16.dp),
+                    .size(300.dp),
                 contentAlignment = Alignment.Center
             ) {
-                // 背景环形
-                CircularProgressIndicator(
-                    progress = 1f,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    strokeWidth = 8.dp
-                )
-                
-                // 进度环形
-                CircularProgressIndicator(
-                    progress = (elapsedTime % 60000) / 60000f,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp)
-                        .graphicsLayer {
-                            rotationZ = progressRotation
-                        },
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 8.dp
-                )
-                
-                // 时间显示
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.graphicsLayer {
-                        if (isRunning) {
-                            rotationZ = sin(elapsedTime * 0.1f) * 5f
-                        }
-                    }
-                ) {
-                    Text(
-                        text = formatStopwatchMinutes(elapsedTime),
-                        style = MaterialTheme.typography.displayLarge,
-                        fontSize = 72.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = formatStopwatchSeconds(elapsedTime),
-                        style = MaterialTheme.typography.displayLarge,
-                        fontSize = 48.sp,
-                        color = MaterialTheme.colorScheme.primary
+                // 背景动画
+                if (stopwatchState.isRunning) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .scale(pulseScale)
+                            .alpha(0.1f)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = CircleShape
+                            )
                     )
                 }
+                
+                // 秒表显示
+                Text(
+                    text = formatStopwatchTime(stopwatchState.elapsedTime),
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = 72.sp,
+                        color = MaterialTheme.colorScheme.onBackground
+                    ),
+                    modifier = Modifier.scale(buttonScale)
+                )
             }
             
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.weight(1f))
             
-            // 修改控制按钮
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                // 开始/暂停按钮
-                Button(
-                    onClick = { isRunning = !isRunning },
-                    modifier = Modifier
-                        .width(120.dp)
-                        .height(64.dp)
-                        .scale(startButtonScale),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRunning) 
-                            MaterialTheme.colorScheme.error 
-                        else 
-                            MaterialTheme.colorScheme.primary
-                    ),
-                    shape = CircleShape,
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 8.dp,
-                        pressedElevation = 12.dp
-                    )
-                ) {
-                    Icon(
-                        imageVector = if (isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (isRunning) "暂停" else "开始",
+                if (!stopwatchState.isRunning) {
+                    Button(
+                        onClick = { 
+                            viewModel.updateStopwatchState(
+                                isRunning = true,
+                                startTime = System.currentTimeMillis()
+                            )
+                        },
                         modifier = Modifier
-                            .size(32.dp)
-                            .graphicsLayer {
-                                if (isRunning) {
-                                    rotationZ = sin(elapsedTime * 0.2f) * 10f
-                                }
-                            }
-                    )
-                }
-                
-                // 计圈按钮
-                Button(
-                    onClick = { 
-                        if (isRunning) {
-                            lapTimes = lapTimes + elapsedTime
-                            // 更新最短记录
-                            val currentLapTime = if (lapTimes.size > 1) {
-                                elapsedTime - lapTimes[lapTimes.size - 2]
-                            } else {
-                                elapsedTime
-                            }
+                            .scale(buttonScale)
+                            .size(80.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = "开始",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    
+                    Button(
+                        onClick = { 
+                            viewModel.updateStopwatchState(
+                                elapsedTime = 0,
+                                lapTimes = emptyList()
+                            )
+                        },
+                        modifier = Modifier
+                            .scale(buttonScale)
+                            .size(80.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Clear,
+                            contentDescription = "重置",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = { 
+                            viewModel.updateStopwatchState(
+                                isRunning = false,
+                                startTime = null
+                            )
+                            // 记录学习时间
+                            viewModel.insertStudyRecord(
+                                StudyRecordEntity(
+                                    startTime = stopwatchState.startTime ?: System.currentTimeMillis(),
+                                    endTime = System.currentTimeMillis(),
+                                    duration = stopwatchState.elapsedTime,
+                                    type = "stopwatch"
+                                )
+                            )
+                        },
+                        modifier = Modifier
+                            .scale(buttonScale)
+                            .size(80.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Pause,
+                            contentDescription = "停止",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    
+                    Button(
+                        onClick = {
+                            val currentLapTime = stopwatchState.elapsedTime - (stopwatchState.lapTimes.lastOrNull() ?: 0L)
+                            val newLapTimes = stopwatchState.lapTimes + stopwatchState.elapsedTime
+                            viewModel.updateStopwatchState(lapTimes = newLapTimes)
                             if (AppState.shortestLapTime == null || currentLapTime < AppState.shortestLapTime!!) {
                                 AppState.shortestLapTime = currentLapTime
                             }
-                        }
-                    },
-                    modifier = Modifier
-                        .width(120.dp)
-                        .height(64.dp)
-                        .scale(lapButtonScale),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary
-                    ),
-                    shape = CircleShape,
-                    enabled = isRunning
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Flag,
-                        contentDescription = "计圈",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-                
-                // 重置按钮
-                Button(
-                    onClick = { 
-                        isRunning = false
-                        elapsedTime = 0
-                        lapTimes = emptyList()
-                        AppState.shortestLapTime = null
-                    },
-                    modifier = Modifier
-                        .width(120.dp)
-                        .height(64.dp)
-                        .scale(resetButtonScale),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    ),
-                    shape = CircleShape
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Clear,
-                        contentDescription = "重置",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // 计圈列表
-            AnimatedVisibility(
-                visible = lapTimes.isNotEmpty(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column {
-                    Text(
-                        text = "记录",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    LazyColumn {
-                        items(lapTimes.size) { index ->
-                            val lapTime = lapTimes[index]
-                            val previousLapTime = if (index > 0) lapTimes[index - 1] else 0
-                            val splitTime = lapTime - previousLapTime
-                            
-                            AnimatedVisibility(
-                                visible = true,
-                                enter = fadeIn() + expandVertically() + slideInVertically { it },
-                                exit = fadeOut() + shrinkVertically() + slideOutVertically { it }
-                            ) {
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface
-                                    )
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${index + 1}",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Text(
-                                                text = formatStopwatchTime(splitTime),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                            Text(
-                                                text = formatStopwatchTime(lapTime),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // 历史记录全屏显示
-        AnimatedVisibility(
-            visible = showHistory,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it }
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "历史记录",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier
+                            .scale(buttonScale)
+                            .size(80.dp),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary
                         )
-                        
-                        IconButton(
-                            onClick = { showHistory = false },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "关闭",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Timer,
+                            contentDescription = "计圈",
+                            modifier = Modifier.size(32.dp)
+                        )
                     }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    LazyColumn {
-                        items(lapTimes.size) { index ->
-                            val lapTime = lapTimes[index]
-                            val previousLapTime = if (index > 0) lapTimes[index - 1] else 0
-                            val splitTime = lapTime - previousLapTime
-                            
-                            AnimatedVisibility(
-                                visible = true,
-                                enter = fadeIn() + expandVertically() + slideInVertically { it },
-                                exit = fadeOut() + shrinkVertically() + slideOutVertically { it }
+                }
+            }
+            
+            if (stopwatchState.lapTimes.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    items(stopwatchState.lapTimes.size) { index ->
+                        val lapTime = if (index == 0) stopwatchState.lapTimes[0] else stopwatchState.lapTimes[index] - stopwatchState.lapTimes[index - 1]
+                        val isShortest = lapTime == AppState.shortestLapTime
+                        
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isShortest) 
+                                    MaterialTheme.colorScheme.primaryContainer 
+                                else 
+                                    MaterialTheme.colorScheme.surface
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface
-                                    )
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp)
-                                    ) {
-                                        Text(
-                                            text = "记录 ${index + 1}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            text = "分段用时：${formatStopwatchTime(splitTime)}",
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                        Text(
-                                            text = "累计用时：${formatStopwatchTime(lapTime)}",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "第 ${index + 1} 圈",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = formatStopwatchTime(lapTime),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (isShortest) 
+                                        MaterialTheme.colorScheme.primary 
+                                    else 
+                                        MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                     }
@@ -1449,28 +816,49 @@ fun StopwatchScreen(viewModel: AppViewModel) {
     }
 }
 
-private fun formatStopwatchMinutes(timeMillis: Long): String {
-    val minutes = (timeMillis % 3600000) / 60000
-    return String.format("%02d", minutes)
-}
-
-private fun formatStopwatchSeconds(timeMillis: Long): String {
-    val seconds = (timeMillis % 60000) / 1000
-    val milliseconds = (timeMillis % 1000) / 10
-    return String.format("%02d.%02d", seconds, milliseconds)
-}
-
-private fun formatStopwatchTime(timeMillis: Long): String {
-    val hours = timeMillis / 3600000
-    val minutes = (timeMillis % 3600000) / 60000
-    val seconds = (timeMillis % 60000) / 1000
-    val milliseconds = (timeMillis % 1000) / 10
+@Composable
+fun TimeSelector(
+    selectedTime: Long,
+    onTimeSelected: (Long) -> Unit
+) {
+    val times = listOf(5L, 10L, 15L, 20L, 25L, 30L, 45L, 60L)
     
-    return if (hours > 0) {
-        String.format("%02d:%02d:%02d.%02d", hours, minutes, seconds, milliseconds)
-    } else {
-        String.format("%02d:%02d.%02d", minutes, seconds, milliseconds)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "选择时间",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            times.forEach { time ->
+                FilterChip(
+                    selected = time == selectedTime,
+                    onClick = { onTimeSelected(time) },
+                    label = { Text("${time}分钟") }
+                )
+            }
+        }
     }
+}
+
+private fun formatTime(milliseconds: Long): String {
+    val seconds = milliseconds / 1000
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return String.format("%02d:%02d", minutes, remainingSeconds)
+}
+
+private fun formatStopwatchTime(milliseconds: Long): String {
+    val minutes = milliseconds / 60000
+    val seconds = (milliseconds % 60000) / 1000
+    val millis = (milliseconds % 1000) / 10
+    return String.format("%02d:%02d.%02d", minutes, seconds, millis)
 }
 
 @Composable
@@ -2470,8 +1858,235 @@ class AppRepository(private val database: AppDatabase) {
     }
 }
 
-private fun formatTime(seconds: Int): String {
-    val minutes = seconds / 60
-    val remainingSeconds = seconds % 60
-    return String.format("%02d:%02d", minutes, remainingSeconds)
+@Composable
+fun CustomTimeScreen(
+    onDismiss: () -> Unit,
+    onTimeSelected: (Long) -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    var showHearts by remember { mutableStateOf(false) }
+    val maxMinutes = 300000L
+    val buttonShape = CircleShape
+    val confirmShape = RoundedCornerShape(24.dp)
+    val deleteColor = MaterialTheme.colorScheme.errorContainer
+    val deleteTextColor = MaterialTheme.colorScheme.onErrorContainer
+    val confirmColor = MaterialTheme.colorScheme.primary
+    val confirmTextColor = MaterialTheme.colorScheme.onPrimary
+    val normalColor = MaterialTheme.colorScheme.secondaryContainer
+    val normalTextColor = MaterialTheme.colorScheme.onSecondaryContainer
+
+    // 彩蛋动画（简单实现：弹出爱心）
+    val hearts = remember { mutableStateListOf<Int>() }
+    LaunchedEffect(showHearts) {
+        if (showHearts) {
+            repeat(20) {
+                hearts.add(it)
+                delay(80)
+            }
+            delay(1200)
+            showHearts = false
+            hearts.clear()
+        }
+    }
+    LaunchedEffect(input) {
+        if (input == "251024") showHearts = true
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 彩蛋动画
+            hearts.forEach { idx ->
+                val x = Random.nextInt(0, 300)
+                val y = Random.nextInt(0, 600)
+                Icon(
+                    imageVector = Icons.Filled.Favorite,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .offset { IntOffset(x, y) }
+                        .size(32.dp)
+                        .alpha(0.7f)
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 24.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // 顶部栏
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回", modifier = Modifier.size(32.dp))
+                    }
+                    Text("自定义时间", style = MaterialTheme.typography.headlineMedium)
+                    Spacer(modifier = Modifier.width(48.dp))
+                }
+                // 时间显示（无冒号，直接显示输入数字，前导补零）
+                Text(
+                    text = input.padStart(6, '0'),
+                    style = MaterialTheme.typography.displayLarge,
+                    modifier = Modifier.padding(vertical = 24.dp)
+                )
+                // 拨号盘
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val dialPad = listOf(
+                        listOf("1", "2", "3"),
+                        listOf("4", "5", "6"),
+                        listOf("7", "8", "9"),
+                        listOf("删除", "0", "确定")
+                    )
+                    dialPad.forEachIndexed { rowIdx, row ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            row.forEachIndexed { colIdx, label ->
+                                when (label) {
+                                    "删除" -> Button(
+                                        onClick = { if (input.isNotEmpty()) input = input.dropLast(1) },
+                                        modifier = Modifier.size(72.dp),
+                                        shape = buttonShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = deleteColor)
+                                    ) {
+                                        Icon(Icons.Filled.Backspace, contentDescription = "删除", tint = deleteTextColor)
+                                    }
+                                    "确定" -> Button(
+                                        onClick = {
+                                            val minutes = input.toLongOrNull() ?: 0L
+                                            if (minutes in 1..maxMinutes) onTimeSelected(minutes)
+                                        },
+                                        modifier = Modifier.width(80.dp).height(72.dp),
+                                        shape = buttonShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = confirmColor)
+                                    ) {
+                                        Text(
+                                            "确定",
+                                            color = confirmTextColor,
+                                            fontSize = 14.sp,
+                                            maxLines = 1
+                                        )
+                                    }
+                                    else -> Button(
+                                        onClick = {
+                                            if (input.length < 6) {
+                                                val newInput = input + label
+                                                val minutes = newInput.toLongOrNull() ?: 0L
+                                                if (minutes <= maxMinutes) input = newInput
+                                            }
+                                        },
+                                        modifier = Modifier.size(72.dp),
+                                        shape = buttonShape,
+                                        colors = ButtonDefaults.buttonColors(containerColor = normalColor)
+                                    ) { Text(label, color = normalTextColor, fontSize = 18.sp) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 历史记录窗口内容
+@Composable
+fun HistoryWindow(viewModel: AppViewModel, onClose: () -> Unit) {
+    val records by viewModel.allStudyRecords.observeAsState(initial = emptyList())
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("历史记录", style = MaterialTheme.typography.headlineMedium)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                items(records) { record ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(formatDateTime(record.startTime), fontSize = 14.sp)
+                        Text(formatDuration(record.duration / 1000), fontSize = 14.sp)
+                        Text(if (record.type == "timer") "计时" else "秒表", fontSize = 14.sp)
+                    }
+                    Divider()
+                }
+            }
+        }
+    }
+}
+
+// 学习时长窗口内容
+@Composable
+fun DurationWindow(viewModel: AppViewModel, onClose: () -> Unit) {
+    val records by viewModel.allStudyRecords.observeAsState(initial = emptyList())
+    val now = System.currentTimeMillis()
+    val today = records.filter { isToday(it.startTime) }
+    val week = records.filter {
+        val cal1 = Calendar.getInstance().apply { timeInMillis = it.startTime }
+        val cal2 = Calendar.getInstance()
+        cal1.get(Calendar.WEEK_OF_YEAR) == cal2.get(Calendar.WEEK_OF_YEAR) &&
+        cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR)
+    }
+    val total = records
+    fun sumDuration(list: List<StudyRecordEntity>) = list.sumOf { it.duration } / 1000
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("学习时长记录", style = MaterialTheme.typography.headlineMedium)
+            }
+            Spacer(modifier = Modifier.height(32.dp))
+            Text("今日学习时长：${formatDuration(sumDuration(today))}", fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("本周学习时长：${formatDuration(sumDuration(week))}", fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("累计学习时长：${formatDuration(sumDuration(total))}", fontSize = 18.sp)
+        }
+    }
 }

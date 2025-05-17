@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>学习助手 - 你的智能学习伙伴</title>
+    <link rel="icon" type="image/png" href="https://static.tang-xinli.com/gh/CFITCorporation/cfitpic@2678d7c66cc3f4e3cea59609cf24b55998682f7c/pic/2025/05/11/f5151f3e170918ec834adfa97ac2929e.png">
     <style>
         * {
             margin: 0;
@@ -68,50 +69,83 @@
             position: relative;
         }
 
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(8px);
+            z-index: 1;
+        }
+
         .hero-content {
             max-width: 800px;
             position: relative;
             z-index: 2;
+            padding: 2rem;
         }
 
         .hero h1 {
-            font-size: 4rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
+            font-size: 4.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
             opacity: 0;
             transform: translateY(20px);
             animation: fadeInUp 1s ease forwards;
             color: #ffffff;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            letter-spacing: 2px;
         }
 
         .hero p {
-            font-size: 1.5rem;
+            font-size: 1.8rem;
             color: #ffffff;
-            margin-bottom: 2rem;
+            margin-bottom: 2.5rem;
             opacity: 0;
             transform: translateY(20px);
             animation: fadeInUp 1s ease 0.3s forwards;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            font-weight: 300;
         }
 
-        .cta-button {
-            display: inline-block;
-            background: #0066cc;
+        .hero-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .download-button {
+            background: #007AFF;
             color: white;
-            padding: 1rem 2rem;
+            padding: 1.2rem 2.5rem;
             border-radius: 30px;
             text-decoration: none;
-            font-size: 1.1rem;
-            transition: all 0.3s;
-            opacity: 0;
-            transform: translateY(20px);
-            animation: fadeInUp 1s ease 0.6s forwards;
+            font-size: 1.3rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.8rem;
+            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+            letter-spacing: 1px;
+            width: auto;
+            text-align: center;
+            padding-left: 1.8rem;
         }
 
-        .cta-button:hover {
-            background: #004499;
-            transform: scale(1.05);
+        .download-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 122, 255, 0.4);
+            background: #0066CC;
+        }
+
+        .download-button i {
+            font-size: 1.5rem;
         }
 
         .section {
@@ -403,6 +437,12 @@
             left: 0;
             color: #0066cc;
         }
+
+        .cta-buttons {
+            display: flex;
+            justify-content: center;
+            margin: 2rem 0;
+        }
     </style>
 </head>
 <body>
@@ -421,7 +461,12 @@
         <div class="hero-content">
             <h1>学习助手</h1>
             <p>让学习更高效，让进步更明显</p>
-            <a href="#download" class="cta-button">立即体验</a>
+            <div class="hero-buttons">
+                <a href="#download" class="download-button">
+                    <i class="fas fa-download"></i>
+                    立即下载
+                </a>
+            </div>
         </div>
     </section>
 
@@ -509,10 +554,13 @@
     <section id="download" class="section">
         <h2>立即下载</h2>
         <p>开启你的高效学习之旅</p>
-        <div style="text-align: center;">
-            <a href="#" class="cta-button">下载学习助手</a>
-            <div class="version-info">V1.0.0 Beta2</div>
+        <div class="cta-buttons">
+            <a href="https://www.123865.com/s/evhqVv-a9pUA" class="download-button" target="_blank">
+                <i class="fas fa-download"></i>
+                立即下载
+            </a>
         </div>
+        <div class="version-info">V1.0.0 Beta2</div>
         <div class="changelog">
             <h3>更新记录</h3>
             <ul>
@@ -560,9 +608,13 @@
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
                 e.preventDefault();
-                document.querySelector(this.getAttribute('href')).scrollIntoView({
-                    behavior: 'smooth'
-                });
+                const targetId = this.getAttribute('href');
+                const targetElement = document.querySelector(targetId);
+                if (targetElement) {
+                    targetElement.scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                }
             });
         });
 

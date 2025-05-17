@@ -12,6 +12,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LearningAssistant"
         tools:targetApi="31">
+        <service
+            android:name=".service.TimerService"
+            android:enabled="true"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
